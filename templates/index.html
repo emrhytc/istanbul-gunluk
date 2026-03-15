@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>İstanbul Günlük</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #0f0f13;
+      color: #e8e8f0;
+      min-height: 100vh;
+      padding: 16px;
+      padding-bottom: 40px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-top: env(safe-area-inset-top, 8px);
+    }
+
+    h1 {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: #fff;
+    }
+
+    .fetched-at {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .refresh-btn {
+      background: #1e1e2a;
+      border: 1px solid #333;
+      border-radius: 20px;
+      color: #a0a0c0;
+      font-size: 13px;
+      padding: 6px 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: background 0.2s;
+    }
+
+    .refresh-btn:active { background: #2a2a3a; }
+
+    .refresh-icon { font-size: 14px; display: inline-block; }
+    .refresh-icon.spinning { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- SECTION CARD ---- */
+    .card {
+      background: #1a1a24;
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 16px;
+      border: 1px solid #2a2a38;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #7070a0;
+      margin-bottom: 14px;
+    }
+
+    /* ---- DAM OVERALL ---- */
+    .dam-overall {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .dam-gauge {
+      position: relative;
+      width: 100px;
+      height: 100px;
+      flex-shrink: 0;
+    }
+
+    .dam-gauge svg {
+      transform: rotate(-90deg);
+    }
+
+    .gauge-bg {
+      fill: none;
+      stroke: #2a2a3a;
+      stroke-width: 10;
+    }
+
+    .gauge-fill {
+      fill: none;
+      stroke-width: 10;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.8s ease;
+    }
+
+    .gauge-text {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .gauge-pct {
+      font-size: 22px;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .gauge-label {
+      font-size: 10px;
+      color: #7070a0;
+      margin-top: 3px;
+    }
+
+    .dam-info {
+      flex: 1;
+    }
+
+    .dam-info-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #c0c0e0;
+      margin-bottom: 6px;
+    }
+
+    .dam-info-updated {
+      font-size: 11px;
+      color: #555580;
+      margin-bottom: 12px;
+    }
+
+    .dam-bar-track {
+      height: 10px;
+      background: #2a2a3a;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .dam-bar-fill {
+      height: 100%;
+      border-radius: 5px;
+      transition: width 0.8s ease;
+    }
+
+    .bar-low  { background: linear-gradient(90deg, #e05050, #e07050); }
+    .bar-mid  { background: linear-gradient(90deg, #d0a030, #d0c030); }
+    .bar-high { background: linear-gradient(90deg, #30a060, #30c080); }
+
+    /* ---- WEATHER SCROLL ---- */
+    .weather-scroll {
+      display: flex;
+      overflow-x: auto;
+      gap: 8px;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+    }
+
+    .weather-scroll::-webkit-scrollbar { display: none; }
+
+    .hour-chip {
+      flex: 0 0 auto;
+      background: #23233a;
+      border-radius: 14px;
+      padding: 10px 10px 8px;
+      text-align: center;
+      min-width: 66px;
+      border: 1px solid #2e2e44;
+    }
+
+    .hour-chip.now {
+      background: #2a2a50;
+      border-color: #5555cc;
+    }
+
+    .hour-label {
+      font-size: 11px;
+      color: #7070a0;
+      margin-bottom: 5px;
+    }
+
+    .hour-icon {
+      font-size: 22px;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .hour-temp {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .hour-unit {
+      font-size: 10px;
+      color: #5555aa;
+    }
+
+    .hour-precip {
+      font-size: 10px;
+      color: #6090c0;
+      margin-top: 4px;
+    }
+
+    /* ---- ERROR / LOADING ---- */
+    .error-msg {
+      font-size: 13px;
+      color: #e05050;
+      padding: 8px 0;
+    }
+
+    .loading-msg {
+      font-size: 14px;
+      color: #7070a0;
+      text-align: center;
+      padding: 20px 0;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>İstanbul Günlük</h1>
+    <div class="fetched-at" id="fetched-at">Yükleniyor...</div>
+  </div>
+  <button class="refresh-btn" onclick="loadData()">
+    <span class="refresh-icon" id="spin-icon">↻</span> Yenile
+  </button>
+</header>
+
+<!-- DAM CARD -->
+<div class="card">
+  <div class="section-title">Baraj Doluluk Oranı</div>
+  <div id="dam-content"><div class="loading-msg">Veri yükleniyor...</div></div>
+</div>
+
+<!-- WEATHER CARD -->
+<div class="card">
+  <div class="section-title">Önümüzdeki 12 Saat — Beşiktaş</div>
+  <div id="weather-content"><div class="loading-msg">Veri yükleniyor...</div></div>
+</div>
+
+<script>
+  // WMO weather code → {icon, label}
+  function weatherInfo(code) {
+    if (code === 0)               return { icon: "☀️",  label: "Açık" };
+    if (code === 1)               return { icon: "🌤️", label: "Az Bulutlu" };
+    if (code === 2)               return { icon: "⛅",  label: "Parçalı Bulutlu" };
+    if (code === 3)               return { icon: "☁️",  label: "Kapalı" };
+    if (code >= 45 && code <= 48) return { icon: "🌫️", label: "Sisli" };
+    if (code >= 51 && code <= 55) return { icon: "🌦️", label: "Çiseleme" };
+    if (code >= 61 && code <= 65) return { icon: "🌧️", label: "Yağmurlu" };
+    if (code >= 71 && code <= 77) return { icon: "❄️",  label: "Karlı" };
+    if (code >= 80 && code <= 82) return { icon: "🌦️", label: "Sağanak" };
+    if (code >= 95 && code <= 99) return { icon: "⛈️",  label: "Fırtına" };
+    return { icon: "🌡️", label: "" };
+  }
+
+  function barClass(rate) {
+    if (rate < 30) return "bar-low";
+    if (rate < 60) return "bar-mid";
+    return "bar-high";
+  }
+
+  function gaugeColor(rate) {
+    if (rate < 30) return "#e06050";
+    if (rate < 60) return "#d0b030";
+    return "#30b070";
+  }
+
+  function renderDams(damData) {
+    const overall = damData.overall;
+    if (overall == null) return '<div class="error-msg">Baraj verisi alınamadı.</div>';
+
+    const pct = Math.min(parseFloat(overall), 100);
+    const cls = barClass(pct);
+    const color = gaugeColor(pct);
+    const updated = damData.updated || "";
+
+    // SVG circle gauge: r=40, circumference = 2π*40 ≈ 251.3
+    const circ = 251.3;
+    const offset = circ - (pct / 100) * circ;
+
+    return `
+      <div class="dam-overall">
+        <div class="dam-gauge">
+          <svg width="100" height="100" viewBox="0 0 100 100">
+            <circle class="gauge-bg" cx="50" cy="50" r="40" />
+            <circle class="gauge-fill" cx="50" cy="50" r="40"
+              stroke="${color}"
+              stroke-dasharray="${circ}"
+              stroke-dashoffset="${offset.toFixed(1)}" />
+          </svg>
+          <div class="gauge-text">
+            <div class="gauge-pct">%${pct.toFixed(1)}</div>
+            <div class="gauge-label">doluluk</div>
+          </div>
+        </div>
+        <div class="dam-info">
+          <div class="dam-info-title">İstanbul Barajları</div>
+          <div class="dam-info-updated">Son güncelleme: ${updated}</div>
+          <div class="dam-bar-track">
+            <div class="dam-bar-fill ${cls}" style="width:${pct}%"></div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderWeather(hours) {
+    if (!hours || hours.length === 0) return '<div class="error-msg">Hava durumu verisi alınamadı.</div>';
+
+    return '<div class="weather-scroll">' + hours.map((h, i) => {
+      const isNow = i === 0;
+      const tempColor = h.temp <= 5 ? "#60b0ff" : h.temp <= 15 ? "#9fd0ff" : h.temp <= 25 ? "#fff" : "#ffb060";
+      const { icon } = weatherInfo(h.weather_code);
+      const precip = h.precip_prob != null ? h.precip_prob : 0;
+      const precipHtml = precip > 0
+        ? `<div class="hour-precip">💧${precip}%</div>`
+        : `<div class="hour-precip" style="color:transparent">💧0%</div>`;
+      return `
+        <div class="hour-chip ${isNow ? "now" : ""}">
+          <div class="hour-label">${isNow ? "Şimdi" : h.time}</div>
+          <div class="hour-icon">${icon}</div>
+          <div class="hour-temp" style="color:${tempColor}">${h.temp}<span class="hour-unit">°C</span></div>
+          ${precipHtml}
+        </div>`;
+    }).join("") + "</div>";
+  }
+
+  async function loadData() {
+    const icon = document.getElementById("spin-icon");
+    icon.classList.add("spinning");
+
+    try {
+      const res = await fetch("/api/data");
+      const data = await res.json();
+
+      document.getElementById("fetched-at").textContent = data.fetched_at || "";
+
+      if (data.dams.error) {
+        document.getElementById("dam-content").innerHTML =
+          `<div class="error-msg">Hata: ${data.dams.error}</div>`;
+      } else {
+        document.getElementById("dam-content").innerHTML = renderDams(data.dams);
+      }
+
+      if (data.weather.error) {
+        document.getElementById("weather-content").innerHTML =
+          `<div class="error-msg">Hata: ${data.weather.error}</div>`;
+      } else {
+        document.getElementById("weather-content").innerHTML = renderWeather(data.weather.hours);
+      }
+
+    } catch (err) {
+      document.getElementById("dam-content").innerHTML =
+        `<div class="error-msg">Bağlantı hatası: ${err.message}</div>`;
+    } finally {
+      icon.classList.remove("spinning");
+    }
+  }
+
+  loadData();
+</script>
+
+</body>
+</html>
