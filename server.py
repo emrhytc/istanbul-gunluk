@@ -117,13 +117,67 @@ def index():
     return render_template("index.html")
 
 
+ASSETS = [
+    {"symbol": "CME_MINI:NQ1!", "label": "NQ1!",    "desc": "Nasdaq 100"},
+    {"symbol": "CME_MINI:ES1!", "label": "ES1!",    "desc": "S&P 500"},
+    {"symbol": "CME_MINI:RTY1!","label": "RTY1!",   "desc": "Russell 2000"},
+    {"symbol": "COMEX:SI1!",    "label": "SI1!",    "desc": "Gümüş"},
+    {"symbol": "OANDA:XAUUSD",  "label": "XAUUSD",  "desc": "Altın"},
+    {"symbol": "BITSTAMP:BTCUSD","label": "BTCUSD", "desc": "Bitcoin"},
+    {"symbol": "BITSTAMP:ETHUSD","label": "ETHUSD", "desc": "Ethereum"},
+    {"symbol": "NYMEX:CL1!",    "label": "WTI",     "desc": "Ham Petrol"},
+]
+
+TV_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "Content-Type": "application/json",
+    "Origin": "https://www.tradingview.com",
+    "Referer": "https://www.tradingview.com/",
+}
+
+
+def fetch_markets():
+    """Fetch asset prices and daily change from TradingView scanner API."""
+    tickers = [a["symbol"] for a in ASSETS]
+    payload = {
+        "symbols": {"tickers": tickers, "query": {"types": []}},
+        "columns": ["close", "change", "change_abs"],
+    }
+    try:
+        r = requests.post(
+            "https://scanner.tradingview.com/global/scan",
+            json=payload,
+            headers=TV_HEADERS,
+            timeout=15,
+        )
+        r.raise_for_status()
+        data_map = {item["s"]: item["d"] for item in r.json().get("data", [])}
+
+        result = []
+        for asset in ASSETS:
+            d = data_map.get(asset["symbol"])
+            if d:
+                result.append({
+                    "label": asset["label"],
+                    "desc": asset["desc"],
+                    "price": d[0],
+                    "change_pct": round(d[1], 2),
+                    "change_abs": round(d[2], 2),
+                })
+        return {"assets": result, "error": None}
+    except Exception as e:
+        return {"assets": [], "error": str(e)}
+
+
 @app.route("/api/data")
 def api_data():
     dam_data = fetch_dam_data()
     weather_data = fetch_weather()
+    market_data = fetch_markets()
     return jsonify({
         "dams": dam_data,
         "weather": weather_data,
+        "markets": market_data,
         "fetched_at": datetime.now(ISTANBUL_TZ).strftime("%d %b %Y %H:%M"),
     })
 
