@@ -65,51 +65,68 @@ def _get_iski_token(force_refresh=False):
     return None
 
 
+IBB_DAM_URL = (
+    "https://data.ibb.gov.tr/api/3/action/datastore_search_sql"
+    '?sql=SELECT%20*%20from%20%22b68cbdb0-9bf5-474c-91c4-9256c07c4bdf%22'
+    "%20ORDER%20BY%20%22TARIH%22%20DESC%20LIMIT%2020"
+)
+
+
 def fetch_dam_data():
-    """Fetch Istanbul dam fill rates from ISKI API."""
+    """Fetch Istanbul dam fill rates.
+
+    Tries ISKI live API first; falls back to IBB open-data (CKAN) if
+    iski.istanbul is unreachable (e.g. foreign server IP blocked).
+    """
+    # --- Primary: ISKI live API ---
     token = _get_iski_token()
-    if not token:
-        debug = _ISKI_TOKEN_CACHE.get("debug", "")
-        return {"dams": [], "overall": None, "source": "iski.istanbul", "error": f"Token alınamadı: {debug}"}
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Authorization": f"Bearer {token}",
-        "Referer": "https://iski.istanbul/",
-    }
-    try:
-        # Daily summary per dam
-        r1 = requests.get(ISKI_API_BASE + "iski/baraj/gunlukOzet/v2", headers=headers, timeout=15)
-        if r1.status_code == 401:
-            token = _get_iski_token(force_refresh=True)
-            if not token:
-                return {"dams": [], "overall": None, "source": "iski.istanbul", "error": "Token alınamadı"}
-            headers["Authorization"] = f"Bearer {token}"
+    if token:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "Referer": "https://iski.istanbul/",
+        }
+        try:
             r1 = requests.get(ISKI_API_BASE + "iski/baraj/gunlukOzet/v2", headers=headers, timeout=15)
-        r1.raise_for_status()
-        summary = r1.json()
+            if r1.status_code == 401:
+                token = _get_iski_token(force_refresh=True)
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                    r1 = requests.get(ISKI_API_BASE + "iski/baraj/gunlukOzet/v2", headers=headers, timeout=15)
+            r1.raise_for_status()
+            summary = r1.json()
 
-        # Overall fill rate
-        r2 = requests.get(ISKI_API_BASE + "iski/baraj/genelOran/v2", headers=headers, timeout=15)
-        r2.raise_for_status()
-        general = r2.json()
+            r2 = requests.get(ISKI_API_BASE + "iski/baraj/genelOran/v2", headers=headers, timeout=15)
+            r2.raise_for_status()
+            general = r2.json()
 
-        dams = [
-            {
-                "name": item["baslikAdi"],
-                "rate": float(item["yuzde"]),
-                "m3": item.get("m3"),
-                "kita": item.get("kita"),
-            }
-            for item in summary.get("data", [])
-        ]
-        overall = general.get("data", {}).get("oran")
-        updated = summary.get("sonGuncellemeZamani", "")
+            dams = [
+                {"name": item["baslikAdi"], "rate": float(item["yuzde"]),
+                 "m3": item.get("m3"), "kita": item.get("kita")}
+                for item in summary.get("data", [])
+            ]
+            overall = general.get("data", {}).get("oran")
+            updated = summary.get("sonGuncellemeZamani", "")
+            return {"dams": dams, "overall": overall, "updated": updated, "source": "iski.istanbul", "error": None}
+        except Exception:
+            pass  # fall through to IBB
 
-        return {"dams": dams, "overall": overall, "updated": updated, "source": "iski.istanbul", "error": None}
-    except Exception as e:
-        return {"dams": [], "overall": None, "source": "iski.istanbul", "error": str(e)}
+    # --- Fallback: IBB open-data (CKAN) ---
+    try:
+        r = requests.get(IBB_DAM_URL, timeout=15)
+        r.raise_for_status()
+        records = r.json().get("result", {}).get("records", [])
+        if records:
+            latest_date = records[0]["TARIH"]
+            latest = [rec for rec in records if rec["TARIH"] == latest_date]
+            dams = [{"name": rec["BARAJ_ADI"], "rate": float(rec["DOLULUK_ORANI"])} for rec in latest]
+            overall = round(sum(d["rate"] for d in dams) / len(dams), 1) if dams else None
+            return {"dams": dams, "overall": overall, "updated": latest_date, "source": "data.ibb.gov.tr", "error": None}
+    except Exception:
+        pass
+
+    return {"dams": [], "overall": None, "source": "-", "error": "Baraj verisi alınamadı (her iki kaynak da erişilemiyor)"}
 
 
 def fetch_weather():
