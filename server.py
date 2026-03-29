@@ -226,16 +226,52 @@ def fetch_markets():
 
 @app.route("/api/data")
 def api_data():
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        f_dam     = ex.submit(fetch_dam_data)
-        f_weather = ex.submit(fetch_weather)
-        f_markets = ex.submit(fetch_markets)
-    return jsonify({
-        "dams":      f_dam.result(),
-        "weather":   f_weather.result(),
-        "markets":   f_markets.result(),
-        "fetched_at": datetime.now(ISTANBUL_TZ).strftime("%d %b %Y %H:%M"),
-    })
+    try:
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            f_dam     = ex.submit(fetch_dam_data)
+            f_weather = ex.submit(fetch_weather)
+            f_markets = ex.submit(fetch_markets)
+        return jsonify({
+            "dams":       f_dam.result(),
+            "weather":    f_weather.result(),
+            "markets":    f_markets.result(),
+            "fetched_at": datetime.now(ISTANBUL_TZ).strftime("%d %b %Y %H:%M"),
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/api/debug")
+def api_debug():
+    """Quick connectivity check for each data source."""
+    results = {}
+    try:
+        r = requests.get("https://iski.istanbul/", headers=_ISKI_HEADERS, timeout=8)
+        results["iski_homepage"] = r.status_code
+    except Exception as e:
+        results["iski_homepage"] = str(e)
+    try:
+        r = requests.get(IBB_DAM_URL, timeout=8)
+        results["ibb_ckan"] = r.status_code
+    except Exception as e:
+        results["ibb_ckan"] = str(e)
+    try:
+        r = requests.get(
+            f"https://api.open-meteo.com/v1/forecast?latitude={BESIKTAS_LAT}&longitude={BESIKTAS_LON}&hourly=temperature_2m&forecast_days=1&timezone=Europe%2FIstanbul",
+            timeout=8,
+        )
+        results["open_meteo"] = r.status_code
+    except Exception as e:
+        results["open_meteo"] = str(e)
+    try:
+        r = requests.post("https://scanner.tradingview.com/global/scan",
+                          json={"symbols": {"tickers": ["OANDA:XAUUSD"], "query": {"types": []}}, "columns": ["close"]},
+                          headers=TV_HEADERS, timeout=8)
+        results["tradingview"] = r.status_code
+    except Exception as e:
+        results["tradingview"] = str(e)
+    return jsonify(results)
 
 
 if __name__ == "__main__":
