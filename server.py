@@ -24,16 +24,27 @@ def _get_iski_token(force_refresh=False):
         return _ISKI_TOKEN_CACHE["token"]
 
     # Step 1: fetch the homepage and extract /_nuxt/*.js script URLs
+    home_status = None
     try:
         home = requests.get("https://iski.istanbul/", headers=_ISKI_HEADERS, timeout=15)
+        home_status = home.status_code
         script_urls = re.findall(r'/_nuxt/[^"\']+\.js', home.text)
-        # deduplicate while preserving order
         seen = set()
         unique_scripts = [u for u in script_urls if not (u in seen or seen.add(u))]
-    except Exception:
-        unique_scripts = []
+    except Exception as e:
+        _ISKI_TOKEN_CACHE["debug"] = f"Homepage fetch failed: {e}"
+        return None
 
-    # Step 2: scan each script for the auth token
+    if not unique_scripts:
+        _ISKI_TOKEN_CACHE["debug"] = f"Homepage {home_status}: no /_nuxt/*.js scripts found"
+        return None
+
+    # Step 2: scan each script for the auth token (try multiple patterns)
+    token_patterns = [
+        r'NUXT_ENV_AUTH_TOKEN:"([^"]+)"',
+        r'"NUXT_ENV_AUTH_TOKEN"\s*:\s*"([^"]+)"',
+        r"NUXT_ENV_AUTH_TOKEN:'([^']+)'",
+    ]
     for path in unique_scripts:
         try:
             r = requests.get(
@@ -41,13 +52,16 @@ def _get_iski_token(force_refresh=False):
                 headers=_ISKI_HEADERS,
                 timeout=15,
             )
-            match = re.search(r'NUXT_ENV_AUTH_TOKEN:"([^"]+)"', r.text)
-            if match:
-                _ISKI_TOKEN_CACHE["token"] = match.group(1)
-                return _ISKI_TOKEN_CACHE["token"]
+            for pattern in token_patterns:
+                match = re.search(pattern, r.text)
+                if match:
+                    _ISKI_TOKEN_CACHE["token"] = match.group(1)
+                    _ISKI_TOKEN_CACHE["debug"] = None
+                    return _ISKI_TOKEN_CACHE["token"]
         except Exception:
             continue
 
+    _ISKI_TOKEN_CACHE["debug"] = f"Scanned {len(unique_scripts)} scripts, token not found"
     return None
 
 
@@ -55,7 +69,8 @@ def fetch_dam_data():
     """Fetch Istanbul dam fill rates from ISKI API."""
     token = _get_iski_token()
     if not token:
-        return {"dams": [], "overall": None, "source": "iski.istanbul", "error": "Token alınamadı"}
+        debug = _ISKI_TOKEN_CACHE.get("debug", "")
+        return {"dams": [], "overall": None, "source": "iski.istanbul", "error": f"Token alınamadı: {debug}"}
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
