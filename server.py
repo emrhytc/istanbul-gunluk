@@ -15,23 +15,39 @@ BESIKTAS_LON = 29.0061
 ISKI_API_BASE = "https://iskiapi.iski.istanbul/api/"
 _ISKI_TOKEN_CACHE = {"token": None}
 
+_ISKI_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://iski.istanbul/"}
 
-def _get_iski_token():
-    """Fetch the ISKI auth token from the Nuxt bundle (cached per process)."""
-    if _ISKI_TOKEN_CACHE["token"]:
+
+def _get_iski_token(force_refresh=False):
+    """Fetch the ISKI auth token by scanning Nuxt bundle scripts dynamically."""
+    if _ISKI_TOKEN_CACHE["token"] and not force_refresh:
         return _ISKI_TOKEN_CACHE["token"]
+
+    # Step 1: fetch the homepage and extract /_nuxt/*.js script URLs
     try:
-        r = requests.get(
-            "https://iski.istanbul/_nuxt/57631b9.js",
-            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://iski.istanbul/"},
-            timeout=15,
-        )
-        match = re.search(r'NUXT_ENV_AUTH_TOKEN:"([^"]+)"', r.text)
-        if match:
-            _ISKI_TOKEN_CACHE["token"] = match.group(1)
-            return _ISKI_TOKEN_CACHE["token"]
+        home = requests.get("https://iski.istanbul/", headers=_ISKI_HEADERS, timeout=15)
+        script_urls = re.findall(r'/_nuxt/[^"\']+\.js', home.text)
+        # deduplicate while preserving order
+        seen = set()
+        unique_scripts = [u for u in script_urls if not (u in seen or seen.add(u))]
     except Exception:
-        pass
+        unique_scripts = []
+
+    # Step 2: scan each script for the auth token
+    for path in unique_scripts:
+        try:
+            r = requests.get(
+                f"https://iski.istanbul{path}",
+                headers=_ISKI_HEADERS,
+                timeout=15,
+            )
+            match = re.search(r'NUXT_ENV_AUTH_TOKEN:"([^"]+)"', r.text)
+            if match:
+                _ISKI_TOKEN_CACHE["token"] = match.group(1)
+                return _ISKI_TOKEN_CACHE["token"]
+        except Exception:
+            continue
+
     return None
 
 
@@ -50,6 +66,12 @@ def fetch_dam_data():
     try:
         # Daily summary per dam
         r1 = requests.get(ISKI_API_BASE + "iski/baraj/gunlukOzet/v2", headers=headers, timeout=15)
+        if r1.status_code == 401:
+            token = _get_iski_token(force_refresh=True)
+            if not token:
+                return {"dams": [], "overall": None, "source": "iski.istanbul", "error": "Token alınamadı"}
+            headers["Authorization"] = f"Bearer {token}"
+            r1 = requests.get(ISKI_API_BASE + "iski/baraj/gunlukOzet/v2", headers=headers, timeout=15)
         r1.raise_for_status()
         summary = r1.json()
 
