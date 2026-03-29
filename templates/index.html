@@ -436,13 +436,29 @@
     }).join("") + "</div>";
   }
 
+  function setAllError(msg) {
+    ["market-content", "dam-content", "weather-content"].forEach(id => {
+      document.getElementById(id).innerHTML = `<div class="error-msg">${msg}</div>`;
+    });
+  }
+
   async function loadData() {
     const icon = document.getElementById("spin-icon");
     icon.classList.add("spinning");
 
     try {
       const res = await fetch("/api/data");
-      const data = await res.json();
+      if (!res.ok) {
+        setAllError(`Sunucu hatası: HTTP ${res.status}`);
+        return;
+      }
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        setAllError("Sunucu geçersiz yanıt döndürdü. Uygulama henüz başlıyor olabilir, birkaç saniye sonra tekrar dene.");
+        return;
+      }
 
       document.getElementById("fetched-at").textContent = data.fetched_at || "";
 
@@ -468,8 +484,7 @@
       }
 
     } catch (err) {
-      document.getElementById("dam-content").innerHTML =
-        `<div class="error-msg">Bağlantı hatası: ${err.message}</div>`;
+      setAllError(`Bağlantı hatası: ${err.message}`);
     } finally {
       icon.classList.remove("spinning");
     }
