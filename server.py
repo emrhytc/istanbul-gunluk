@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, render_template
 import requests
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 import pytz
 import re
 import os
@@ -26,7 +27,7 @@ def _get_iski_token(force_refresh=False):
     # Step 1: fetch the homepage and extract /_nuxt/*.js script URLs
     home_status = None
     try:
-        home = requests.get("https://iski.istanbul/", headers=_ISKI_HEADERS, timeout=15)
+        home = requests.get("https://iski.istanbul/", headers=_ISKI_HEADERS, timeout=8)
         home_status = home.status_code
         script_urls = re.findall(r'/_nuxt/[^"\']+\.js', home.text)
         seen = set()
@@ -50,7 +51,7 @@ def _get_iski_token(force_refresh=False):
             r = requests.get(
                 f"https://iski.istanbul{path}",
                 headers=_ISKI_HEADERS,
-                timeout=15,
+                timeout=8,
             )
             for pattern in token_patterns:
                 match = re.search(pattern, r.text)
@@ -88,16 +89,16 @@ def fetch_dam_data():
             "Referer": "https://iski.istanbul/",
         }
         try:
-            r1 = requests.get(ISKI_API_BASE + "iski/baraj/gunlukOzet/v2", headers=headers, timeout=15)
+            r1 = requests.get(ISKI_API_BASE + "iski/baraj/gunlukOzet/v2", headers=headers, timeout=8)
             if r1.status_code == 401:
                 token = _get_iski_token(force_refresh=True)
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
-                    r1 = requests.get(ISKI_API_BASE + "iski/baraj/gunlukOzet/v2", headers=headers, timeout=15)
+                    r1 = requests.get(ISKI_API_BASE + "iski/baraj/gunlukOzet/v2", headers=headers, timeout=8)
             r1.raise_for_status()
             summary = r1.json()
 
-            r2 = requests.get(ISKI_API_BASE + "iski/baraj/genelOran/v2", headers=headers, timeout=15)
+            r2 = requests.get(ISKI_API_BASE + "iski/baraj/genelOran/v2", headers=headers, timeout=8)
             r2.raise_for_status()
             general = r2.json()
 
@@ -114,7 +115,7 @@ def fetch_dam_data():
 
     # --- Fallback: IBB open-data (CKAN) ---
     try:
-        r = requests.get(IBB_DAM_URL, timeout=15)
+        r = requests.get(IBB_DAM_URL, timeout=8)
         r.raise_for_status()
         records = r.json().get("result", {}).get("records", [])
         if records:
@@ -139,7 +140,7 @@ def fetch_weather():
         f"&timezone=Europe%2FIstanbul"
     )
     try:
-        resp = requests.get(url, timeout=15)
+        resp = requests.get(url, timeout=8)
         resp.raise_for_status()
         data = resp.json()
 
@@ -202,7 +203,7 @@ def fetch_markets():
             "https://scanner.tradingview.com/global/scan",
             json=payload,
             headers=TV_HEADERS,
-            timeout=15,
+            timeout=8,
         )
         r.raise_for_status()
         data_map = {item["s"]: item["d"] for item in r.json().get("data", [])}
@@ -225,13 +226,14 @@ def fetch_markets():
 
 @app.route("/api/data")
 def api_data():
-    dam_data = fetch_dam_data()
-    weather_data = fetch_weather()
-    market_data = fetch_markets()
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        f_dam     = ex.submit(fetch_dam_data)
+        f_weather = ex.submit(fetch_weather)
+        f_markets = ex.submit(fetch_markets)
     return jsonify({
-        "dams": dam_data,
-        "weather": weather_data,
-        "markets": market_data,
+        "dams":      f_dam.result(),
+        "weather":   f_weather.result(),
+        "markets":   f_markets.result(),
         "fetched_at": datetime.now(ISTANBUL_TZ).strftime("%d %b %Y %H:%M"),
     })
 
